@@ -5,27 +5,28 @@ FROM nginx:alpine
 RUN rm /etc/nginx/conf.d/default.conf
 
 # Buat file konfigurasi Nginx untuk reverse proxy gRPC
-# Konfigurasi ini telah diperbaiki untuk mengatasi masalah konektivitas dan SSL handshake
+# dengan perbaikan untuk masalah konektivitas IPv6 dan SSL/SNI
 RUN <<EOF cat > /etc/nginx/conf.d/grpc_proxy.conf
 server {
-    # Nginx akan mendengarkan di port 8080 untuk lalu lintas HTTP/2
     listen 8080 http2;
 
+    # Tambahkan resolver untuk memastikan resolusi DNS berfungsi dengan andal di dalam container.
+    # Cloudflare (1.1.1.1) dan Google (8.8.8.8) adalah pilihan yang baik.
+    # "ipv6=off" sangat penting untuk mencegah kesalahan "Network unreachable" di lingkungan Render.
+    resolver 1.1.1.1 8.8.8.8 valid=60s ipv6=off;
+
     location / {
-        # SOLUSI 1: Gunakan resolver publik dan nonaktifkan pencarian IPv6.
-        # Ini untuk menghindari kesalahan "Network unreachable" di lingkungan seperti Render.
-        resolver 8.8.8.8 ipv6=off;
+        # Setel upstream ke variabel. Ini memaksa Nginx untuk menggunakan resolver yang
+        # ditentukan di atas pada saat runtime, alih-alih saat Nginx dimulai.
+        set $upstream_grpc vps-monitor.fly.dev:443;
 
-        # Variabel ini diperlukan agar Nginx menggunakan 'resolver' di atas.
-        set $upstream_host "vps-monitor.fly.dev";
+        # Teruskan permintaan ke server gRPC upstream
+        grpc_pass grpcs://$upstream_grpc;
 
-        # Teruskan permintaan gRPC ke server upstream (vps-monitor.fly.dev)
-        grpc_pass grpcs://$upstream_host:443;
-
-        # SOLUSI 2: Teruskan nama host yang benar ke upstream.
-        # Ini memperbaiki kesalahan "peer closed connection in SSL handshake"
-        # dengan memastikan SNI yang benar dikirim.
-        grpc_set_header Host $upstream_host;
+        # Perbaikan Kritis untuk Kesalahan SSL Handshake:
+        # Aktifkan SNI. Ini memberitahu Nginx untuk meneruskan nama host ("vps-monitor.fly.dev")
+        # selama handshake TLS, sehingga server upstream tahu domain mana yang Anda coba jangkau.
+        grpc_ssl_server_name on;
     }
 }
 EOF
