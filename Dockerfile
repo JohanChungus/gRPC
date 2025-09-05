@@ -1,14 +1,25 @@
-# Gunakan image NGINX resmi dari Docker Hub
+# Gunakan image Nginx resmi dari Docker Hub
 FROM nginx:alpine
 
-# Hapus konfigurasi default NGINX
+# Hapus konfigurasi Nginx default
 RUN rm /etc/nginx/conf.d/default.conf
 
-# Salin file konfigurasi kustom Anda ke dalam image
-COPY nginx.conf /etc/nginx/nginx.conf
+# Buat file konfigurasi Nginx untuk reverse proxy gRPC
+RUN <<EOF cat > /etc/nginx/conf.d/grpc_proxy.conf
+server {
+    # Nginx akan mendengarkan di port 8080 untuk lalu lintas HTTP/2
+    listen 8080 http2;
 
-# Ekspos port yang akan didengarkan oleh NGINX di dalam container
+    location / {
+        # Teruskan permintaan gRPC ke server upstream (vps-monitor.fly.dev)
+        # "grpcs" menunjukkan bahwa koneksi ke upstream diamankan dengan TLS
+        grpc_pass grpcs://vps-monitor.fly.dev:443;
+    }
+}
+EOF
+
+# Ekspos port 8080 untuk mengizinkan lalu lintas masuk
 EXPOSE 8080
 
-# Perintah untuk menjalankan NGINX saat container dimulai
+# Jalankan Nginx di latar depan saat container dimulai
 CMD ["nginx", "-g", "daemon off;"]
